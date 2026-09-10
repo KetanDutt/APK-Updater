@@ -47,11 +47,11 @@ class AptoideUpdater(private val context: Context): KoinComponent {
 		val mutex = Mutex()
 		apks.chunked(100).forEach { chunk ->
 			launch {
-				val result = runCatching { listAppUpdates(ListAppsUpdatesRequest(chunk, exclude)).third.get() }
-				result.fold(
-					success = { mutex.withLock { updates.addAll(parseData(it.list, apps)) } },
-					failure = { mutex.withLock { errors.add(it) } }
-				)
+			val result = runCatching { listAppUpdates(ListAppsUpdatesRequest(chunk, exclude)).third.get() }
+			result.fold(
+				onSuccess = { mutex.withLock { updates.addAll(parseData(it.list, apps)) } },
+				onFailure = { mutex.withLock { errors.add(it) } }
+			)
 			}.let { mutex.withLock { jobs.add(it) } }
 		}
 		jobs.forEach { it.join() }

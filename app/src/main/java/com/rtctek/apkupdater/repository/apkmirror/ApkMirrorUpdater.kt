@@ -19,6 +19,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.koin.core.KoinComponent
+import java.util.Locale
 
 class ApkMirrorUpdater(private val prefs: AppPrefs): KoinComponent {
 
@@ -55,8 +56,8 @@ class ApkMirrorUpdater(private val prefs: AppPrefs): KoinComponent {
 			launch {
 				val result = runCatching { post(chunk).third.get() }
 				result.fold(
-					success = { parsed -> mutex.withLock { updates.addAll(parseData(parsed, chunk)) } },
-					failure = { mutex.withLock { errors.add(it) } }
+				onSuccess = { parsed -> mutex.withLock { updates.addAll(parseData(parsed, chunk)) } },
+				onFailure = { mutex.withLock { errors.add(it) } }
 				)
 			}.let { mutex.withLock { jobs.add(it) } }
 		}

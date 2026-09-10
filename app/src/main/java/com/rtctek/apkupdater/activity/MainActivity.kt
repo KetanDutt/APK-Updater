@@ -7,8 +7,6 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
-import android.view.Gravity
-import android.widget.FrameLayout
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.navigation.findNavController
@@ -163,7 +161,6 @@ class MainActivity : AppCompatActivity() {
 
 	private fun snackBar(text: String) = Snackbar.make(binding.container, text, Snackbar.LENGTH_LONG).apply {
 		setAction(getString(R.string.action_close)) { dismiss() }
-		(layoutParams as FrameLayout.LayoutParams).gravity = Gravity.TOP
 	}.show()
 
 	override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -176,7 +173,8 @@ class MainActivity : AppCompatActivity() {
 			updatesViewModel.setLoading(requestCode, false)
 			searchViewModel.setLoading(requestCode, false)
 			// The installer may return with no extras at all; that used to crash here.
-			val reason = data?.extras?.let { if (it.isNotEmpty()) it.values.first() else null }
+			val extras = data?.extras
+			val reason = if (extras != null && extras.size() > 0) extras.values().firstOrNull()?.toString() else null
 			viewModel.snackbar.postValue(
 				if (reason == null) getString(R.string.app_install_failure, getString(R.string.app_install_cancelled))
 				else getString(R.string.app_install_failure, reason)
