@@ -173,8 +173,9 @@ class MainActivity : AppCompatActivity() {
 			updatesViewModel.setLoading(requestCode, false)
 			searchViewModel.setLoading(requestCode, false)
 			// The installer may return with no extras at all; that used to crash here.
+			// Bundle is not a Map: use keySet() + get().
 			val extras = data?.extras
-			val reason = if (extras != null && extras.size() > 0) extras.values().firstOrNull()?.toString() else null
+			val reason = extras?.keySet()?.firstOrNull()?.let { extras?.get(it) }?.toString()
 			viewModel.snackbar.postValue(
 				if (reason == null) getString(R.string.app_install_failure, getString(R.string.app_install_cancelled))
 				else getString(R.string.app_install_failure, reason)
