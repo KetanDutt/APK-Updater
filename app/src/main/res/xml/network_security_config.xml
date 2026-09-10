@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Cleartext traffic is disabled by default for all network requests.
+    The only exception is the Aurora Store token dispenser used by the
+    Google Play source, which only supports plain HTTP.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">auroraoss.com</domain>
+    </domain-config>
+</network-security-config>

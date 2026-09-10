@@ -10,13 +10,15 @@ class VerInfo(element: Element, packageName: String) {
 	val architectures: List<String>
 	val downloadLink: String
 
+	// Parsing is intentionally lenient: a single malformed HTML block must not take
+	// down the whole APKPure update check.
 	init {
 		val versionNameAndCode = element.getElementsByClass("ver-info-top").text().split(" ").takeLast(2)
-		versionName = versionNameAndCode[0]
-		versionCode = versionNameAndCode[1].removeSurrounding("(", ")").toInt()
-		minApiLevel = element.getElementsByTag("p")[2]
-				.text().split(" ").last().removeSuffix(")").toInt()
-		architectures = element.getElementsByTag("p")[5].text().replace(",", "").split(" ").drop(0)
+		versionName = versionNameAndCode.getOrNull(0) ?: ""
+		versionCode = versionNameAndCode.getOrNull(1)?.removeSurrounding("(", ")")?.toIntOrNull() ?: 0
+		val paragraphs = element.getElementsByTag("p")
+		minApiLevel = paragraphs.getOrNull(2)?.text()?.split(" ")?.lastOrNull()?.removeSuffix(")")?.toIntOrNull() ?: 0
+		architectures = paragraphs.getOrNull(5)?.text()?.replace(",", "")?.split(" ") ?: emptyList()
 		downloadLink = element.getElementsByClass(" down").attr("href")
 	}
 }

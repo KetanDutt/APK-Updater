@@ -16,14 +16,17 @@ class ApkPureSearch: KoinComponent {
 	private fun search(text: String): List<AppSearch> {
 		val doc = Jsoup.connect("$baseUrl$searchQuery$text").get()
 		val rowsWithApps = doc.select("dl")
-		return rowsWithApps.map {
-			AppSearch(
-				it.select("dd > p").first().text(),
-				"$baseUrl${it.select("dd > p > a").attr("href")}",
-				it.select("dt > a > img").attr("src"),
-				it.select("dd > p")[1].select("a").text(),
-				source
-			)
+		return rowsWithApps.mapNotNull {
+			// A single malformed row must not fail the whole search.
+			val name = it.select("dd > p").firstOrNull()?.text().orEmpty()
+			if (name.isEmpty()) null else
+				AppSearch(
+					name,
+					"$baseUrl${it.select("dd > p > a").attr("href")}",
+					it.select("dt > a > img").attr("src"),
+					it.select("dd > p").getOrNull(1)?.select("a")?.text().orEmpty(),
+					source
+				)
 		}
 	}
 

@@ -2,6 +2,7 @@ package com.rtctek.apkupdater.repository
 
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
+import android.util.Log
 import com.rtctek.apkupdater.model.ui.AppUpdate
 import com.rtctek.apkupdater.repository.apkmirror.ApkMirrorUpdater
 import com.rtctek.apkupdater.repository.apkpure.ApkPureUpdater
@@ -54,8 +55,14 @@ class UpdatesRepository: KoinComponent {
 	}
 
 	private fun filterUpdates(updates: MutableList<AppUpdate>, apps: Sequence<PackageInfo>) {
+		val installed = apps.toList()
 		updates.retainAll { update ->
-			Version(update.version).isHigherThan(apps.find { apk -> apk.packageName == update.packageName }?.versionName)
+			val versionName = installed.find { it.packageName == update.packageName }?.versionName
+			if (versionName.isNullOrEmpty()) true
+			// A non parseable version name must not break the whole check.
+			else runCatching { Version(update.version).isHigherThan(Version(versionName)) }
+				.getOrDefault(false)
+				.also { if (!it) Log.d("UpdatesRepository", "Dropped update for ${update.packageName}: $update.version is not higher than $versionName") }
 		}
 	}
 

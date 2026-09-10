@@ -2,11 +2,14 @@ package com.rtctek.apkupdater.fragment
 
 import android.os.Bundle
 import androidx.preference.ListPreference
+import androidx.preference.Preference
 import androidx.preference.PreferenceFragmentCompat
 import androidx.preference.SeekBarPreference
 import androidx.preference.SwitchPreferenceCompat
+import com.rtctek.apkupdater.BuildConfig
 import com.rtctek.apkupdater.R
 import com.rtctek.apkupdater.util.app.AlarmUtil
+import com.rtctek.apkupdater.util.launchUrl
 import com.rtctek.apkupdater.viewmodel.MainViewModel
 import eu.chainfire.libsuperuser.Shell
 import org.koin.android.ext.android.inject
@@ -39,9 +42,26 @@ class SettingsFragment : PreferenceFragmentCompat() {
 			if (Shell.SU.available()) {
 				true
 			} else {
-				mainViewModel.snackbar.postValue("Root not available.")
+				mainViewModel.snackbar.postValue(getString(R.string.root_not_available))
 				false
 			}
+		}
+
+		// About / developer links
+		findPreference<Preference>(getString(R.string.settings_about_key))?.apply {
+			summary = getString(R.string.settings_about_version, BuildConfig.VERSION_NAME)
+			setOnPreferenceClickListener {
+				launchUrl(getString(R.string.settings_github_url))
+				true
+			}
+		}
+		findPreference<Preference>(getString(R.string.settings_original_project_key))?.setOnPreferenceClickListener {
+			launchUrl(getString(R.string.settings_original_project_url))
+			true
+		}
+		findPreference<Preference>(getString(R.string.settings_license_key))?.setOnPreferenceClickListener {
+			launchUrl(getString(R.string.settings_license_url))
+			true
 		}
 	}
 

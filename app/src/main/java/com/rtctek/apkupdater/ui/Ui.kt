@@ -69,7 +69,7 @@ fun CustomCard(alpha: Float = 1f, content: @Composable () -> Unit) = Card(
     backgroundColor = Color.Transparent,
     modifier = Modifier
         .padding(top = 8.dp, start = 8.dp, end = 8.dp)
-        .fillMaxSize()
+        .fillMaxWidth()
         .alpha(alpha)
 )
 

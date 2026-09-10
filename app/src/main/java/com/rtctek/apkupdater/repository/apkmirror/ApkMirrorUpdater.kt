@@ -19,7 +19,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.koin.core.KoinComponent
-import java.util.*
+import java.util.Locale
 
 class ApkMirrorUpdater(private val prefs: AppPrefs): KoinComponent {
 
@@ -44,7 +44,7 @@ class ApkMirrorUpdater(private val prefs: AppPrefs): KoinComponent {
 		.post(baseUrl + appExists)
 		.header("User-Agent", userAgent)
 		.authentication().basic(user, token)
-		.jsonBody(AppExistsRequest(apps.map { it.packageName }, if(excludeExperimental) listOf("alpha", "beta") else emptyList()))
+		.jsonBody(AppExistsRequest(apps.map { it.packageName }, if (excludeExperimental) listOf("alpha", "beta") else emptyList()))
 		.responseObject<AppExistsResponse>()
 
 	fun updateAsync(apps: Sequence<AppInstalled>) = ioScope.async {
@@ -54,9 +54,10 @@ class ApkMirrorUpdater(private val prefs: AppPrefs): KoinComponent {
 		val mutex = Mutex()
 		apps.chunked(100).forEach { chunk ->
 			launch {
-				post(chunk).third.fold(
-					success = { updates.addAll(parseData(it, chunk)) },
-					failure = { errors.add(it) }
+				val result = runCatching { post(chunk).third.get() }
+				result.fold(
+				onSuccess = { parsed -> mutex.withLock { updates.addAll(parseData(parsed, chunk)) } },
+				onFailure = { mutex.withLock { errors.add(it) } }
 				)
 			}.let { mutex.withLock { jobs.add(it) } }
 		}
@@ -70,7 +71,7 @@ class ApkMirrorUpdater(private val prefs: AppPrefs): KoinComponent {
 				!excludeArch -> it
 				it.arches.isEmpty() -> it
 				it.arches.contains("universal") || it.arches.contains("noarch") -> it
-				it.arches.find { a -> a.contains(arch) }?.length ?: 0 > 0 -> it
+				(it.arches.find { a -> a.contains(arch) }?.length ?: 0) > 0 -> it
 				else -> null
 			}
 		}.mapNotNull {
@@ -79,11 +80,11 @@ class ApkMirrorUpdater(private val prefs: AppPrefs): KoinComponent {
 				minApiToInt(it.minapi) < Build.VERSION.SDK_INT -> it
 				else -> null
 			}
-		}.filter { it.versionCode > apps.find { app -> app.packageName == data.pname }?.versionCode ?: 0 }
+		}.filter { it.versionCode > (apps.find { app -> app.packageName == data.pname }?.versionCode ?: 0) }
 		.takeIf { it.isNotEmpty() }?.reduce { a, b ->
 			when {
 				a.arches.contains(Build.CPU_ABI) -> a
-				a.arches.find { ar -> ar.contains(arch) }?.length ?: 0 > 0 -> a
+				(a.arches.find { ar -> ar.contains(arch) }?.length ?: 0) > 0 -> a
 				else -> b
 			}
 		}?.let {

@@ -31,9 +31,8 @@ class AppsRepository(private val context: Context, private val prefs: AppPrefs) 
 
 	fun getPackageInfosFiltered(options: Int = 0) = getPackageInfos(options).filter { !ignoredApps.contains(it.packageName) }
 
-	fun getApps(options: Int = 0) = getPackageInfos(options).mapIndexed { i, app ->
+	fun getApps(options: Int = 0) = getPackageInfos(options).map { app ->
 		AppInstalled(
-			i,
 			app.name(context),
 			app.packageName,
 			app.versionName ?: "",
@@ -43,9 +42,8 @@ class AppsRepository(private val context: Context, private val prefs: AppPrefs) 
 		)
 	}.sortedBy { it.name }.sortedBy { it.ignored }.toList()
 
-	fun getAppsFiltered(apps: Sequence<PackageInfo>) = apps.mapIndexed { i, app ->
+	fun getAppsFiltered(apps: Sequence<PackageInfo>) = apps.map { app ->
 		AppInstalled(
-			i,
 			app.name(context),
 			app.packageName,
 			app.versionName ?: "",

@@ -6,13 +6,14 @@ import com.rtctek.apkupdater.model.apkpure.VerInfo
 import com.rtctek.apkupdater.model.ui.AppInstalled
 import com.rtctek.apkupdater.model.ui.AppUpdate
 import com.rtctek.apkupdater.util.app.AppPrefs
-import com.rtctek.apkupdater.util.ifNotEmpty
 import com.rtctek.apkupdater.util.ioScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.sync.withPermit
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
@@ -28,6 +29,9 @@ class ApkPureUpdater(private val prefs: AppPrefs) : KoinComponent {
 	private val excludeMinApi get() = prefs.settings.excludeMinApi
 	private val arch get() = Build.CPU_ABI
 	private val api get() = Build.VERSION.SDK_INT
+
+	// Limit concurrent page fetches so we are polite to the site and don't get blocked.
+	private val concurrencyLimit = Semaphore(8)
 
 	private fun getApkPackageLink(name: String): String {
 		val doc = Jsoup.connect("$baseUrl$searchQuery$name").get()
@@ -52,61 +56,68 @@ class ApkPureUpdater(private val prefs: AppPrefs) : KoinComponent {
 		return Pair(!element.getElementsByTag("title").text().contains("404"), element)
 	}
 
-	private fun crawlVersionsPage(element: Element, verInfos: MutableList<VerInfo>, app: AppInstalled) {
+	// Returns the versions found for a single app; never throws for malformed HTML.
+	private fun crawlVersions(element: Element, app: AppInstalled): List<VerInfo> {
+		val verInfos = mutableListOf<VerInfo>()
 		if (hasVariants(element)) {
 			getVariantsPage(element).select("div.ver-info").forEach { variant ->
 				verInfos.add(VerInfo(variant, app.packageName))
 			}
 		} else {
-			val verInfo = VerInfo(element.select("div.ver > ul.ver-wrap > li > div.ver-info").first(), app.packageName)
-			verInfos.add(verInfo)
+			val info = element.select("div.ver > ul.ver-wrap > li > div.ver-info").firstOrNull()
+				?.let { VerInfo(it, app.packageName) }
+			if (info != null) verInfos.add(info)
 		}
+		return verInfos
 	}
 
-	private fun crawlUpdates(verInfos: MutableList<VerInfo>, app: AppInstalled) {
-		getApkPackageLink(app.packageName).ifNotEmpty { packageLink ->
-			val (gotVersionsPage, element) = resolveVersionsPage(packageLink)
-			if (gotVersionsPage) {
-				crawlVersionsPage(element, verInfos, app)
-			}
-		}
+	private fun crawlUpdates(app: AppInstalled): List<VerInfo> {
+		val packageLink = getApkPackageLink(app.packageName)
+		if (packageLink.isEmpty()) return emptyList()
+		val (gotVersionsPage, element) = resolveVersionsPage(packageLink)
+		if (gotVersionsPage) return crawlVersions(element, app)
+		return emptyList()
 	}
 
 	fun updateAsync(apps: Sequence<AppInstalled>) = ioScope.async {
-		val updates = mutableListOf<AppUpdate>()
 		val verInfos = mutableListOf<VerInfo>()
 		val jobs = mutableListOf<Job>()
 		val mutex = Mutex()
 
 		apps.forEach { app ->
 			launch {
-				crawlUpdates(verInfos, app)
+				// One malformed page must not fail the whole source.
+				concurrencyLimit.withPermit {
+					val infos = runCatching { crawlUpdates(app) }.getOrDefault(emptyList())
+					if (infos.isNotEmpty()) mutex.withLock { verInfos.addAll(infos) }
+				}
 			}.let { mutex.withLock { jobs.add(it) } }
 		}
 		jobs.forEach { it.join() }
 
-		verInfos.filter {
-			!excludeArch || it.architectures.contains(arch)
-		}.filter {
-			!excludeMinApi || it.minApiLevel <= api
-		}.forEach { verInfo ->
-			apps.find { app -> app.packageName == verInfo.packageName }?.let {
-				app -> updates.add(AppUpdate.from(app, verInfo))
+		val updates = verInfos
+			.filter { it.versionCode > 0 }
+			.filter { !excludeArch || it.architectures.contains(arch) }
+			.filter { !excludeMinApi || it.minApiLevel <= api }
+			.mapNotNull { verInfo ->
+				apps.find { app -> app.packageName == verInfo.packageName }
+					// Only report a real update, not just the latest published version.
+					?.takeIf { it.versionCode < verInfo.versionCode }
+					?.let { app -> AppUpdate.from(app, verInfo) }
 			}
-		}
 
 		Result.success(updates)
 	}
 
 	private fun AppUpdate.Companion.from(app: AppInstalled, verInfo: VerInfo) =
 			AppUpdate(
-					app.name,
-					app.packageName,
-					verInfo.versionName,
-					verInfo.versionCode,
-					app.version,
-					app.versionCode,
-					"$baseUrl${verInfo.downloadLink}",
-					source
+				app.name,
+				app.packageName,
+				verInfo.versionName,
+				verInfo.versionCode,
+				app.version,
+				app.versionCode,
+				"$baseUrl${verInfo.downloadLink}",
+				source
 			)
 }

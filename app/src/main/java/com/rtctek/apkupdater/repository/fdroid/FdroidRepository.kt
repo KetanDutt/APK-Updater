@@ -19,6 +19,8 @@ import com.google.gson.Gson
 import com.google.gson.stream.JsonReader
 import com.kryptoprefs.invoke
 import kotlinx.coroutines.async
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.koin.core.KoinComponent
 import org.koin.core.inject
 import java.io.File
@@ -35,8 +37,10 @@ class FdroidRepository: KoinComponent {
 	private val baseUrl = "https://f-droid.org/repo/"
 	private val index = "index-v1.jar"
 
-	private var lastCheck = 0L
-	private var data: FdroidData? = null
+	// The index can be requested by the update and search flows at the same time.
+	private val refreshMutex = Mutex()
+	@Volatile private var lastCheck = 0L
+	@Volatile private var data: FdroidData? = null
 
 	private val arch: List<String> by lazy {
 		if (Build.VERSION.SDK_INT >= 21) {
@@ -48,69 +52,84 @@ class FdroidRepository: KoinComponent {
 
 	@Suppress("BlockingMethodInNonBlockingContext")
 	fun getDataAsync() = ioScope.async {
-        runCatching {
-            if (data == null || System.currentTimeMillis() - lastCheck > 3600000) {
-                // Head request so we get only the headers
-                var last = ""
-                try {
-                    last = Fuel.head("$baseUrl$index").response().second.headers["Last-Modified"].first()
-                } catch (e: Exception) {
+		runCatching {
+			if (data == null || System.currentTimeMillis() - lastCheck > 3600000) {
+				refreshMutex.withLock {
+					if (data == null || System.currentTimeMillis() - lastCheck > 3600000) {
+						// Head request so we get only the headers
+						var last = ""
+						try {
+							last = Fuel.head("$baseUrl$index").response().second.headers["Last-Modified"].firstOrNull().orEmpty()
+						} catch (e: Exception) {
+							Log.w("FdroidRepository", "HEAD request failed, index will be re-downloaded", e)
+						}
 
-                }
+						lastCheck = System.currentTimeMillis()
 
-                lastCheck = System.currentTimeMillis()
+						// Check if last changed
+						var refresh = false
+						if (last != prefs.lastFdroid() || data == null) {
+							// Download new file
+							installer.downloadAsync(context, "$baseUrl$index", file)
+							prefs.lastFdroid(last)
+							refresh = true
+						}
 
-                // Check if last changed
-                var refresh = false
-                if (last != prefs.lastFdroid() || data == null) {
-                    // Download new file
-                    installer.downloadAsync(context, "$baseUrl$index", file)
-                    prefs.lastFdroid(last)
-                    refresh = true
-                }
-
-                // Read the json from inside jar
-                if (data == null || refresh) {
-                    val jar = JarFile(file)
-                    val stream = jar.getInputStream(jar.getEntry("index-v1.json"))
-                    data = Gson().fromJson<FdroidData>(JsonReader(InputStreamReader(stream, "UTF-8")), FdroidData::class.java)
-                }
-            }
-            data
-        }.fold(
-            onSuccess = { it },
-            onFailure = {
-                Log.e("FdroidRepository", "getDataAsync", it)
-                null
-            }
-        )
+						// Read the json from inside jar
+						if (data == null || refresh) {
+							val jar = JarFile(file)
+							val stream = jar.getInputStream(jar.getEntry("index-v1.json"))
+							data = Gson().fromJson<FdroidData>(JsonReader(InputStreamReader(stream, "UTF-8")), FdroidData::class.java)
+						}
+					}
+				}
+			}
+			data
+		}.fold(
+			onSuccess = { it },
+			onFailure = {
+				Log.e("FdroidRepository", "getDataAsync", it)
+				null
+			}
+		)
 	}
 
 	fun updateAsync(apps: Sequence<AppInstalled>) = ioScope.async {
 		runCatching {
-			if (getDataAsync().await() == null) throw NullPointerException("updateAsync: data is null")
+			val fdroidData = getDataAsync().await() ?: throw NullPointerException("updateAsync: data is null")
+			// Indexes make per-app lookups O(1) instead of scanning the whole repo.
+			val packageMap = fdroidData.packages
+			val appMap = fdroidData.apps.associateBy { it.packageName }
 
-			apps.mapNotNull { app -> if (prefs.settings.excludeExperimental && isExperimental(data?.apps?.find { it.packageName == app.packageName }?: FdroidApp())) null else app }
-				.mapNotNull { app -> if (prefs.settings.excludeMinApi && data?.packages?.get(app.packageName)?.first()?.minSdkVersion.orZero() > Build.VERSION.SDK_INT) null else app }
-				.mapNotNull { app -> if (prefs.settings.excludeArch && isIncompatibleArch(data?.packages?.get(app.packageName)?.first())) null else app }
-				.mapNotNull { app -> data?.packages?.get(app.packageName)?.first()?.let { pack -> if (pack.versionCode > app.versionCode) AppUpdate.from(app, pack) else null }
-			}.sortedBy { it.name }.toList()
+			apps.mapNotNull { app -> if (prefs.settings.excludeExperimental && isExperimental(appMap[app.packageName] ?: FdroidApp())) null else app }
+				.mapNotNull { app -> if (prefs.settings.excludeMinApi && packageMap[app.packageName]?.firstOrNull()?.minSdkVersion.orZero() > Build.VERSION.SDK_INT) null else app }
+				.mapNotNull { app -> if (prefs.settings.excludeArch && isIncompatibleArch(packageMap[app.packageName]?.firstOrNull())) null else app }
+				.mapNotNull { app -> packageMap[app.packageName]?.firstOrNull()?.let { pack -> if (pack.versionCode > app.versionCode) AppUpdate.from(app, pack) else null } }
+				.sortedBy { it.name }.toList()
 		}.onFailure { Result.failure<List<AppUpdate>>(it) }.onSuccess { Result.success(it) }
 	}
 
 	fun searchAsync(text: String) = ioScope.async {
-		runCatching {
-			getDataAsync().await()?.apps.orEmpty()
-				.asSequence()
-				.filter { app -> app.description.contains(text, true) || app.packageName.contains(text, true) }
-				.mapNotNull { app -> if (prefs.settings.excludeExperimental && isExperimental(app)) null else app }
-				.mapNotNull { app -> if (prefs.settings.excludeMinApi && data?.packages?.get(app.packageName)?.first()?.minSdkVersion.orZero() > Build.VERSION.SDK_INT) null else app }
-				.mapNotNull { app -> if (prefs.settings.excludeArch && isIncompatibleArch(data?.packages?.get(app.packageName)?.first())) null else app }
-				.sortedByDescending { app -> app.lastUpdated }
-				.take(10)
-				.map { app -> AppSearch.from(app) }
-				.toList()
-		}.fold(onSuccess = { Result.success(it) }, onFailure = { Result.failure(it) })
+		// A missing index means "no results from F-Droid", not a hard failure:
+		// the other sources should still be able to return results.
+		val fdroidData = getDataAsync().await()
+		if (fdroidData == null) {
+			Result.success(emptyList<AppSearch>())
+		} else {
+			val packageMap = fdroidData.packages
+			runCatching {
+				fdroidData.apps
+					.asSequence()
+					.filter { app -> app.description.contains(text, true) || app.packageName.contains(text, true) }
+					.mapNotNull { app -> if (prefs.settings.excludeExperimental && isExperimental(app)) null else app }
+					.mapNotNull { app -> if (prefs.settings.excludeMinApi && packageMap[app.packageName]?.firstOrNull()?.minSdkVersion.orZero() > Build.VERSION.SDK_INT) null else app }
+					.mapNotNull { app -> if (prefs.settings.excludeArch && isIncompatibleArch(packageMap[app.packageName]?.firstOrNull())) null else app }
+					.sortedByDescending { app -> app.lastUpdated }
+					.take(10)
+					.map { app -> AppSearch.from(app) }
+					.toList()
+			}.fold(onSuccess = { Result.success(it) }, onFailure = { Result.failure(it) })
+		}
 	}
 
 	private fun isIncompatibleArch(pack: FdroidPackage?): Boolean {
