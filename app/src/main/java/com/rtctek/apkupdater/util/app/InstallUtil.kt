@@ -17,6 +17,7 @@ import org.koin.core.inject
 import java.io.File
 import java.io.IOException
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
@@ -27,6 +28,16 @@ class InstallUtil: KoinComponent {
 	private val fileProvider = "com.rtctek.apkupdater.fileprovider"
 	private val downloadDir = "downloads"
 	private val mime = "application/vnd.android.package-archive"
+
+	// Shared client with generous timeouts: APKs are large and read timeout is
+	// per-socket-idle, not total download time.
+	private val httpClient = OkHttpClient.Builder()
+		.connectTimeout(30, TimeUnit.SECONDS)
+		.readTimeout(10, TimeUnit.MINUTES)
+		.writeTimeout(10, TimeUnit.MINUTES)
+		.followRedirects(true)
+		.followSslRedirects(true)
+		.build()
 
 	private fun clearOldFiles(context: Context) {
 		val dir = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) File(context.cacheDir, downloadDir) else context.externalCacheDir
@@ -79,9 +90,12 @@ class InstallUtil: KoinComponent {
 	}
 
 	fun get(url: String, file: File): File {
-		val response = OkHttpClient.Builder().followRedirects(true).build().newCall(Request.Builder().url(url).build()).execute()
-		if (!response.isSuccessful) throw IOException("Response not successful: ${response.code}")
-		file.sink().buffer().apply { writeAll(response.body!!.source()) }.close()
+		val response = httpClient.newCall(Request.Builder().url(url).build()).execute()
+		response.use {
+			if (!it.isSuccessful) throw IOException("Response not successful: ${it.code}")
+			val body = it.body ?: throw IOException("Empty response body: ${it.code}")
+			file.sink().buffer().use { sink -> sink.writeAll(body.source()) }
+		}
 		return file
 	}
 

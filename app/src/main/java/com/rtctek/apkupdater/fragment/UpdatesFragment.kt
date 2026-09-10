@@ -37,6 +37,7 @@ class UpdatesFragment : Fragment() {
 	private val prefs: AppPrefs by inject()
 	private val googlePlayRepository: GooglePlayRepository by inject()
 	private val binding by lazy { FragmentUpdatesBinding.inflate(layoutInflater) }
+
 	override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View =
 		binding.root
 
@@ -55,25 +56,32 @@ class UpdatesFragment : Fragment() {
 	}
 
 	private val onBind = { view: View, app: AppUpdate ->
-        runCatching {
+		runCatching {
 			val viewBinding = ViewAppsBinding.bind(view)
 			viewBinding.name.text = app.name
 			viewBinding.packageName.text = app.packageName
 			viewBinding.version.text = getString(R.string.update_version_version_code, app.oldVersion, app.oldCode, app.version, app.versionCode)
 			viewBinding.actionOne.text = getString(R.string.action_install)
-            if (app.loading) {
+			if (app.loading) {
 				viewBinding.progress.visibility = View.VISIBLE
 				viewBinding.actionOne.visibility = View.INVISIBLE
-            } else {
+			} else {
 				viewBinding.progress.visibility = View.INVISIBLE
 				viewBinding.actionOne.visibility = View.VISIBLE
 				viewBinding.actionOne.text = getString(R.string.action_install)
 				viewBinding.actionOne.setOnClickListener { if (app.url.endsWith("apk") || app.url == "play") downloadAndInstall(app) else launchUrl(app.url) }
-            }
+			}
 			viewBinding.source.setColorFilter(view.context.getAccentColor(), PorterDuff.Mode.MULTIPLY)
 			Glide.with(view).load(app.source).into(viewBinding.source)
-            Glide.with(view).load(iconUri(app.packageName, view.context.packageManager.getApplicationInfo(app.packageName, 0).icon)).into(viewBinding.icon)
-        }.onFailure { Log.e("UpdatesFragment", "onBind", it) }.let { }
+
+			// The app may have been uninstalled since the check; a missing icon
+			// must not break the rest of the row.
+			runCatching {
+				view.context.packageManager.getApplicationInfo(app.packageName, 0).icon
+			}.getOrNull()?.let { iconId ->
+				Glide.with(view).load(iconUri(app.packageName, iconId)).into(viewBinding.icon)
+			}
+		}.onFailure { Log.e("UpdatesFragment", "onBind", it) }.let { }
 	}
 
 	private fun downloadAndInstall(app: AppUpdate) = ioScope.launch {
@@ -81,13 +89,13 @@ class UpdatesFragment : Fragment() {
 			updatesViewModel.setLoading(app.id, true)
 			val url = if (app.url == "play") googlePlayRepository.getDownloadUrl(app.packageName, app.versionCode, app.oldCode) else app.url
 			val file = installer.downloadAsync(requireActivity(), url) { _, _ -> updatesViewModel.setLoading(app.id, true) }
-			if(installer.install(requireActivity(), file, app.id)) {
+			if (installer.install(requireActivity(), file, app.id)) {
 				updatesViewModel.setLoading(app.id, false)
 				updatesViewModel.remove(app.id)
 				mainViewModel.snackbar.postValue(getString(R.string.app_install_success))
 			} else if (prefs.settings.rootInstall) {
 				updatesViewModel.setLoading(app.id, false)
-				mainViewModel.snackbar.postValue(getString(R.string.app_install_failure))
+				mainViewModel.snackbar.postValue(getString(R.string.app_install_failure, getString(R.string.app_install_failure_unknown)))
 			}
 		}.onFailure {
 			updatesViewModel.setLoading(app.id, false)

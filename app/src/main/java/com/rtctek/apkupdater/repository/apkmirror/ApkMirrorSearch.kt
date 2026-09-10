@@ -19,14 +19,18 @@ class ApkMirrorSearch: KoinComponent {
 		val a = row.select("a.byDeveloper")
 		val h5 = row.select("h5.appRowTitle").take(a.size)
 		val img = row.select("img")
-		return (0 until a.size).map {
-			AppSearch(
-				h5[it].attr("title"),
-				"$baseUrl${h5[it].selectFirst("a").attr("href")}",
-				"$baseUrl${img[it].attr("src")}".replace("=32", "=64"),
-				a[it].text(),
-				source
-			)
+		return (0 until a.size).mapNotNull { i ->
+			// A single malformed row must not fail the whole search.
+			val title = h5.getOrNull(i)?.attr("title").orEmpty()
+			val link = h5.getOrNull(i)?.selectFirst("a")?.attr("href").orEmpty()
+			if (title.isEmpty() || link.isEmpty()) null else
+				AppSearch(
+					title,
+					"$baseUrl$link",
+					"$baseUrl${img.getOrNull(i)?.attr("src").orEmpty()}".replace("=32", "=64"),
+					a[i].text(),
+					source
+				)
 		}
 	}
 

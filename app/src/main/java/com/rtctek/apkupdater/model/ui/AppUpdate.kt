@@ -6,9 +6,7 @@ import com.rtctek.apkupdater.model.apkmirror.AppExistsResponseApk
 import com.rtctek.apkupdater.model.apkmirror.AppExistsResponseData
 import com.rtctek.apkupdater.model.aptoide.App
 import com.rtctek.apkupdater.util.adapter.Id
-import com.rtctek.apkupdater.util.crc.crc16
 import com.rtctek.apkupdater.util.name
-import kotlin.random.Random
 
 data class AppUpdate(
 	val name: String = "",
@@ -19,10 +17,12 @@ data class AppUpdate(
 	val oldCode: Int = 0,
 	val url: String = "",
 	val source: Int = 0,
-	override val id: Int = crc16(packageName + versionCode + source),
-	var loading: Boolean = false,
-	val ad: Int = Random.nextInt(10)
-): Id {
+	var loading: Boolean = false
+) : Id {
+
+	// 32-bit stable id; keeps data class equality and DiffUtil behaviour consistent.
+	override val id: Int get() = (packageName.hashCode() * 31 + versionCode) * 31 + source
+
 	companion object {
 
 		fun from(context: Context, info: PackageInfo, app: App, source: Int): AppUpdate =
@@ -30,7 +30,7 @@ data class AppUpdate(
 				info.name(context),
 				app.packageName,
 				app.file.vername,
-				app.file.vercode.toInt(),
+				app.file.vercode.toIntOrNull() ?: 0,
 				info.versionName ?: "null",
 				info.versionCode,
 				app.file.path,

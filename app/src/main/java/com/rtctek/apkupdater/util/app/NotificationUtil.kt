@@ -28,12 +28,19 @@ class NotificationUtil(private val context: Context) {
 			action = updateAction
 		}
 
+		// FLAG_IMMUTABLE is required on Android 12+ for fixed intents.
+		val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+			PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+		} else {
+			PendingIntent.FLAG_UPDATE_CURRENT
+		}
+
 		val builder = NotificationCompat.Builder(context, channelId)
 			.setSmallIcon(R.drawable.ic_update_black_24dp)
 			.setContentTitle(updateTitle)
 			.setContentText(context.resources.getQuantityString(R.plurals.notification_update_description, num, num))
 			.setPriority(NotificationCompat.PRIORITY_DEFAULT)
-			.setContentIntent(PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT))
+			.setContentIntent(PendingIntent.getActivity(context, 0, intent, flags))
 			.setAutoCancel(true)
 
 		createNotificationChannel()

@@ -1,11 +1,15 @@
 package com.rtctek.apkupdater.activity
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.view.Gravity
 import android.widget.FrameLayout
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.navigation.findNavController
 import androidx.navigation.ui.setupWithNavController
@@ -41,6 +45,11 @@ class MainActivity : AppCompatActivity() {
 	private val controller by lazy { findNavController(R.id.nav_host_fragment) }
 	private val binding by lazy { ActivityMainBinding.inflate(layoutInflater) }
 
+	// Android 13+ requires a runtime permission to post the update notifications.
+	private val notificationPermissionLauncher = registerForActivityResult(
+		ActivityResultContracts.RequestPermission()
+	) { /* The user can also grant it later from the system settings. */ }
+
 	override fun onCreate(savedInstanceState: Bundle?) {
 		super.onCreate(savedInstanceState)
 
@@ -64,6 +73,9 @@ class MainActivity : AppCompatActivity() {
 		binding.swipeLayout.setOnRefreshListener { checkForUpdates() }
 		viewModel.loading.observe(this) { binding.swipeLayout.isRefreshing = it }
 
+		// Notification permission (Android 13+)
+		requestNotificationPermission()
+
 		// Schedule alarm
 		alarmUtil.setupAlarm(applicationContext)
 
@@ -83,6 +95,13 @@ class MainActivity : AppCompatActivity() {
 			goToSearch(it)
 		}
 		super.onNewIntent(intent)
+	}
+
+	private fun requestNotificationPermission() {
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+			checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+			notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+		}
 	}
 
 	private fun goToUpdates(intent: Intent) {
@@ -144,7 +163,7 @@ class MainActivity : AppCompatActivity() {
 
 	private fun snackBar(text: String) = Snackbar.make(binding.container, text, Snackbar.LENGTH_LONG).apply {
 		setAction(getString(R.string.action_close)) { dismiss() }
-		(view.layoutParams as FrameLayout.LayoutParams).gravity = Gravity.TOP
+		(layoutParams as FrameLayout.LayoutParams).gravity = Gravity.TOP
 	}.show()
 
 	override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
@@ -156,8 +175,12 @@ class MainActivity : AppCompatActivity() {
 		} else {
 			updatesViewModel.setLoading(requestCode, false)
 			searchViewModel.setLoading(requestCode, false)
-			val reason = if (data == null) getString(R.string.app_install_cancelled) else data.extras?.get(data.extras?.keySet()?.first())
-			viewModel.snackbar.postValue(getString(R.string.app_install_failure, reason))
+			// The installer may return with no extras at all; that used to crash here.
+			val reason = data?.extras?.let { if (it.isNotEmpty()) it.values.first() else null }
+			viewModel.snackbar.postValue(
+				if (reason == null) getString(R.string.app_install_failure, getString(R.string.app_install_cancelled))
+				else getString(R.string.app_install_failure, reason)
+			)
 		}
 
 		super.onActivityResult(requestCode, resultCode, data)

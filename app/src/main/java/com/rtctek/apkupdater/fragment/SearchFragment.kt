@@ -1,9 +1,7 @@
 package com.rtctek.apkupdater.fragment
 
 import android.content.Context
-import android.graphics.Color
 import android.graphics.PorterDuff
-import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
 import android.util.Log
 import android.view.LayoutInflater
@@ -90,22 +88,24 @@ class SearchFragment : Fragment() {
 	}.invokeOnCompletion { mainViewModel.loading.postValue(false) }
 
 	private val onBind = { view: View, app: AppSearch ->
-		val viewBinding = ViewAppsBinding.bind(view)
-		app.iconurl.ifNotEmpty { Glide.with(view).load(it).placeholder(ColorDrawable(Color.BLACK)).error(ColorDrawable(Color.RED)).into(viewBinding.icon) }
-		viewBinding.name.text = app.name
-		viewBinding.packageName.text = app.developer
+		runCatching {
+			val viewBinding = ViewAppsBinding.bind(view)
+			app.iconurl.ifNotEmpty { Glide.with(view).load(it).into(viewBinding.icon) }
+			viewBinding.name.text = app.name
+			viewBinding.packageName.text = app.developer
 
-		if (app.loading) {
-			viewBinding.progress.visibility = View.VISIBLE
-			viewBinding.actionOne.visibility = View.INVISIBLE
-		} else {
-			viewBinding.progress.visibility = View.INVISIBLE
-			viewBinding.actionOne.visibility = View.VISIBLE
-			viewBinding.actionOne.text = getString(R.string.action_install)
-			viewBinding.actionOne.setOnClickListener { if (app.url.endsWith("apk") || app.url == "play")  downloadAndInstall(app) else launchUrl(app.url) }
-		}
-		Glide.with(view).load(app.source).into(viewBinding.source)
-		viewBinding.source.setColorFilter(view.context.getAccentColor(), PorterDuff.Mode.MULTIPLY)
+			if (app.loading) {
+				viewBinding.progress.visibility = View.VISIBLE
+				viewBinding.actionOne.visibility = View.INVISIBLE
+			} else {
+				viewBinding.progress.visibility = View.INVISIBLE
+				viewBinding.actionOne.visibility = View.VISIBLE
+				viewBinding.actionOne.text = getString(R.string.action_install)
+				viewBinding.actionOne.setOnClickListener { if (app.url.endsWith("apk") || app.url == "play") downloadAndInstall(app) else launchUrl(app.url) }
+			}
+			viewBinding.source.setColorFilter(view.context.getAccentColor(), PorterDuff.Mode.MULTIPLY)
+			Glide.with(view).load(app.source).into(viewBinding.source)
+		}.onFailure { Log.e("SearchFragment", "onBind", it) }.let { }
 	}
 
 	private fun downloadAndInstall(app: AppSearch) = ioScope.launch {
@@ -113,13 +113,13 @@ class SearchFragment : Fragment() {
 			searchViewModel.setLoading(app.id, true)
 			val url = if (app.url == "play") googlePlayRepository.getDownloadUrl(app.packageName, app.versionCode, 0) else app.url
 			val file = installer.downloadAsync(requireActivity(), url) { _, _ -> searchViewModel.setLoading(app.id, true) }
-			if(installer.install(requireActivity(), file, app.id)) {
+			if (installer.install(requireActivity(), file, app.id)) {
 				searchViewModel.setLoading(app.id, false)
 				searchViewModel.remove(app.id)
 				mainViewModel.snackbar.postValue(getString(R.string.app_install_success))
 			} else if (prefs.settings.rootInstall) {
 				searchViewModel.setLoading(app.id, false)
-				mainViewModel.snackbar.postValue(getString(R.string.app_install_failure))
+				mainViewModel.snackbar.postValue(getString(R.string.app_install_failure, getString(R.string.app_install_failure_unknown)))
 			}
 		}.onFailure {
 			searchViewModel.setLoading(app.id, false)

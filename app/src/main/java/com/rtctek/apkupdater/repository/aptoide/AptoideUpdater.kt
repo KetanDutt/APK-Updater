@@ -2,6 +2,7 @@ package com.rtctek.apkupdater.repository.aptoide
 
 import android.content.Context
 import android.content.pm.PackageInfo
+import android.os.Build
 import com.rtctek.apkupdater.R
 import com.rtctek.apkupdater.model.ui.AppUpdate
 import com.rtctek.apkupdater.model.aptoide.ApksData
@@ -28,7 +29,7 @@ class AptoideUpdater(private val context: Context): KoinComponent {
 	private val appUpdates = "listAppsUpdates"
 	private val source = R.drawable.aptoide_logo
 	private val prefs: AppPrefs by inject()
-	private val exclude get() = if(prefs.settings.excludeExperimental) "alpha,beta" else ""
+	private val exclude get() = if (prefs.settings.excludeExperimental) "alpha,beta" else ""
 
 	private fun listAppUpdates(request: ListAppsUpdatesRequest) = Fuel
 		.post(baseUrl + appUpdates)
@@ -37,8 +38,7 @@ class AptoideUpdater(private val context: Context): KoinComponent {
 
 	fun updateAsync(apps: Sequence<PackageInfo>) = ioScope.async {
 		val apks = apps.map {
-			val signature = it.signatures?.let { signatures -> computeSha1WithColon(signatures[0].toByteArray()) } ?: ""
-			ApksData(it.packageName, it.versionCode.toString(), signature)
+			ApksData(it.packageName, it.versionCode.toString(), getSignatureSha1(it))
 		}.toList()
 
 		val updates = mutableListOf<AppUpdate>()
@@ -47,9 +47,10 @@ class AptoideUpdater(private val context: Context): KoinComponent {
 		val mutex = Mutex()
 		apks.chunked(100).forEach { chunk ->
 			launch {
-				listAppUpdates(ListAppsUpdatesRequest(chunk, exclude)).third.fold(
-					success = { updates.addAll(parseData(it.list, apps)) },
-					failure = { errors.add(it) }
+				val result = runCatching { listAppUpdates(ListAppsUpdatesRequest(chunk, exclude)).third.get() }
+				result.fold(
+					success = { mutex.withLock { updates.addAll(parseData(it.list, apps)) } },
+					failure = { mutex.withLock { errors.add(it) } }
 				)
 			}.let { mutex.withLock { jobs.add(it) } }
 		}
@@ -60,6 +61,18 @@ class AptoideUpdater(private val context: Context): KoinComponent {
 
 	private fun parseData(list: List<App>, apps: Sequence<PackageInfo>): List<AppUpdate> = list.mapNotNull { app ->
 		apps.find { apk -> apk.packageName == app.packageName }?.let { apk -> AppUpdate.from(context, apk, app, source) }
+	}
+
+	// Apps signed only with APK Signature Scheme v2+ have an empty `signatures` array on
+	// modern Android versions; prefer `signingInfo` when available.
+	@Suppress("DEPRECATION")
+	private fun getSignatureSha1(info: PackageInfo): String {
+		val signer: ByteArray? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+			info.signingInfo?.apkContentsSigners?.firstOrNull()?.toByteArray()
+		} else {
+			null
+		} ?: info.signatures?.firstOrNull()?.toByteArray()
+		return signer?.let { computeSha1WithColon(it) } ?: ""
 	}
 
 }

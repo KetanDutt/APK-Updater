@@ -1,8 +1,8 @@
 package com.rtctek.apkupdater.model.fdroid
 
 data class FdroidData(
-	val packages: Map<String, List<FdroidPackage>>,
-	val apps: List<FdroidApp>
+	val packages: Map<String, List<FdroidPackage>> = emptyMap(),
+	val apps: List<FdroidApp> = emptyList()
 )
 
 data class FdroidPackage(

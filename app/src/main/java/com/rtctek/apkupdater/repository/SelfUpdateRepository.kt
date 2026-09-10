@@ -23,7 +23,8 @@ class SelfUpdateRepository: KoinComponent {
 	private val installer: InstallUtil by inject()
 	private val prefs: AppPrefs by inject()
 
-	private val url = "http://rumboalla.github.io/apkupdater/version.json"
+	// Served from this repository (see /version.json); bump it when publishing a release.
+	private val url = "https://raw.githubusercontent.com/KetanDutt/APK-Updater/main/version.json"
 	private val interval = 60 * 60 * 1000
 
 	fun checkForUpdatesAsync(activity: Activity) = ioScope.catchingAsync {
@@ -31,7 +32,8 @@ class SelfUpdateRepository: KoinComponent {
 			val r = Fuel.get(url).responseString().third.get()
 			val o = Gson().fromJson<SelfUpdateResponse>(r, SelfUpdateResponse::class.java)
 			prefs.selfUpdateCheck(System.currentTimeMillis())
-			if (o.version > activity.packageManager.getPackageInfo(activity.packageName, 0).versionCode) {
+			if (o.apk.isNotBlank()
+				&& o.version > activity.packageManager.getPackageInfo(activity.packageName, 0).versionCode) {
 				if (withContext(Dispatchers.Main) { showDialog(activity, o) }) {
 					installer.install(activity, installer.downloadAsync(activity, o.apk) { _, _ -> }, 0)
 				}

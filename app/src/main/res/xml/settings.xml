@@ -128,4 +128,22 @@
         />
     </PreferenceCategory>
 
+    <PreferenceCategory app:title="@string/settings_developer_title" app:iconSpaceReserved="false">
+        <Preference
+            app:key="@string/settings_about_key"
+            app:title="@string/settings_about_title"
+            app:iconSpaceReserved="false"
+            />
+        <Preference
+            app:key="@string/settings_original_project_key"
+            app:title="@string/settings_original_project_title"
+            app:iconSpaceReserved="false"
+            />
+        <Preference
+            app:key="@string/settings_license_key"
+            app:title="@string/settings_license_title"
+            app:iconSpaceReserved="false"
+            />
+    </PreferenceCategory>
+
 </PreferenceScreen>
