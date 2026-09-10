@@ -1,0 +1,15 @@
+-keepattributes Signature
+
+# Gson
+#noinspection ShrinkerUnresolvedReference
+-keep class sun.misc.Unsafe { *; }
+-keepclassmembers,allowobfuscation class * { @com.google.gson.annotations.SerializedName <fields>; }
+
+# Models
+-keep class com.rtctek.apkupdater.model.** { *; }
+
+# OkHttp
+-keepnames class okhttp3.internal.publicsuffix.PublicSuffixDatabase
+
+# Jsoup
+-keepnames class org.jsoup.nodes.Entities
